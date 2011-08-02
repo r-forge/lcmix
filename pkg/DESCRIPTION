@@ -1,0 +1,13 @@
+Package: lcmix
+Type: Package
+Title: Layered and chained mixture models
+Version: 0.1
+Date: 2011-07-15
+Author: Daniel Dvorkin
+Maintainer: Daniel Dvorkin <daniel.dvorkin@gmail.com>
+Depends: R (>= 2.10.0), R.methodsS3 
+Suggests: ROCR
+Description: Fit layered and chained mixture models, which are special cases of Bayesian belief networks, to lists of data.
+License: GPL (>= 2)
+LazyLoad: yes
+LazyData: yes
