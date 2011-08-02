@@ -1,0 +1,521 @@
+\documentclass{article}
+
+%\VignetteIndexEntry{Layered and chained mixture models with lcmix}
+
+\usepackage{lcmix} % local style file
+
+\begin{document}
+
+\title{Layered and chained mixture models \\ with the \lcmix\ package (version 0.1)}
+\author{Daniel Dvorkin}
+\maketitle
+
+% abstract
+The \lcmix\ package fits layered and chained mixture models, which are special cases of Bayesian belief networks, to lists of data.  It also offers mixture models for single data sources, similarly to the \mixtools\ \citep{Benaglia2009a} and \mclust\ \citep{Fraley2002a, Fraley2006a} packages, but offers a wider choice of distributions; currently univariate and multivariate normal (Gaussian), Weibull, and gamma distributions are supported, with more distributions to be added in future releases.  The primary tool used in model fitting is the EM algorithm as described in \citet{McLachlan2008a}.  
+
+The following sections describe the models used, how to fit models, ways to evaluate the quality of the fitted models, and procedures for simulating data.  Users seeking a quick start guide can proceed directly to \S\ref{sec:fit}, ``Fitting models to data,'' on p.\ \pageref{sec:fit}.  However, it is strongly recommended to be familiar with the material in \S\ref{sec:spec} to understand the behavior of the model fitting algorithms.
+
+\tableofcontents
+
+\section{Model specification}\label{sec:spec}
+
+The basic idea of hidden-variable mixture models such as those used in \lcmix\ is that the ``complete data'' consists of the observed data and some hidden data, consisting of discrete components which generate the distribution of the observed data.  The following subsections describe single-data mixture models, distributions for observed data, and finally the multiple-data (layered and chained) mixture models which are the focus of \lcmix.
+
+\subsection{Single-data mixture models}\label{subsec:spec.mixmod}
+
+In the simple single-data finite mixture model, there exists a hidden categorical random variable (\textrv) $\rv Y$ taking on values from 1 to some positive integer $K$, and having the probability density function (\textpdf)
+\begin{equation}\label{eqn:categorical_pdf}
+	\textstyle \pdf(y) \ = \ \prod_k p_k^{\indic(y=k)} \ = \ p_y
+\end{equation}
+where $\indic(\cdot)$ is the indicator function, $k = 1, \dots, K$, and $\vec p = (p_1, \dots, p_k)$ is a vector of probabilities such that $\sum_k p_k = 1$.  That is, $p_k = \prob(\rv Y = k)$.  
+
+Then $\rv Y$ generates the (possibly multivariate) observed \textrv\ $\mrv X$ as follows.  Let $\pdf(\vec x \mid \theta)$ be a \textpdf\ on the sample space of $\mrv X$ with parameters $\theta$, and let $\theta_y$ denote a particular set of parameters specified by $\rv Y = y$.  Then the conditional \textpdf\ of $\mrv X$ is
+\begin{equation}\label{eqn:mixmod_conditional_pdf}
+	\textstyle \pdf(\vec x \mid \rv Y = y) \ = \ \prod_k \pdf(\vec x \mid \theta_k)^{\indic(y=k)} \ = \ \pdf(\vec x \mid \theta_y)
+\end{equation}
+from which it follows that the complete-data \textpdf\ is
+\begin{equation}\label{eqn:mixmod_complete_pdf}
+	\textstyle \pdf(\vec x, y) \ = \ \prod_k \left\{p_k \ \pdf(\vec x \mid \theta_k)\right\}^{\indic(y=k)} \ = \ p_y \ \pdf(\vec x \mid \theta_y)
+\end{equation}
+and the marginal \textpdf\ is
+\begin{equation}\label{eqn:mixmod_marginal_pdf}
+	\textstyle \pdf(\vec x) = \sum_k p_k \ \pdf(\vec x \mid \theta_k).
+\end{equation}
+
+\subsection{Distributions for observed data}\label{subsec:spec.distn}
+
+The univariate observed data distributions supported in the current release of \lcmix\ are the normal, the Weibull (shape-decay parameterization), and the gamma.  The \textpdf\ of the normal distribution with parameters $\theta = (\mu, \sigma)$, where $\mu$ is the mean and $\sigma > 0$ is the standard deviation, is
+\begin{equation}\label{eqn:norm_pdf}
+	\textstyle \pdf(x \mid \theta) = \frac{1}{\sigma \sqrt{2 \pi}} \exp\left\{-\frac{(x-\mu)^2}{2 \sigma^2}\right\}
+\end{equation}
+Note that the expression in Equation \eqref{eqn:norm_pdf} is often written as $\phi(x \mid \theta)$, or for the standard normal \textpdf, that is, the \textpdf\ for $\mu = 0, \ \sigma = 1$, simply $\phi(x)$.  Similarly, the standard normal \textcdf\ is often denoted by $\Phi(x)$, and its inverse by $\Phi^{-1}(u), \ u \in [0, 1]$.  The parameters of the distribution of the observed variable in a single-data normal mixture model are $\vec \mu = (\mu_1, \dots, \mu_K)$ and $\vec \sigma = (\sigma_1, \dots, \sigma_K)$, with $\theta_y = (\mu_y, \sigma_y)$.  
+
+The shape-decay parameterization of the Weibull distribution, or the ``WeiSD'' distribution, with shape parameter $\sigma > 0$ and decay parameter $\delta > 0$ such that $\theta = (\sigma, \delta)$, has the \textpdf\
+\begin{equation}\label{eqn:weisd_pdf}
+	\textstyle \pdf(x \mid \theta) = \sigma \delta x^{\sigma-1} \exp(-\delta x^\sigma).
+\end{equation}
+Compared to the usual R shape-scale parameterization, with shape parameter $\alpha$  and scale parameter $\beta$, the relationship between the parameters is given by $\alpha = \sigma$ and $\beta = \delta^{-1/\sigma}$, or equivalently, $\sigma = \alpha$ and $\delta = \beta^{-\alpha}$.  The \textcdf\ has the very simple form $\cdf(x \mid \theta) = \exp(-\delta x^\sigma)$.
+The observed variable distribution parameters in a single-data mixture model are $\vec\sigma = (\sigma_1, \dots, \sigma_K)$ and $\vec\delta = (\delta_1, \dots, \delta_K)$, with $\theta_y = (\sigma_y, \delta_y)$.
+
+The gamma distribution with shape parameter $\sigma > 0$ and rate parameter $\lambda > 0$ such that $\theta = (\sigma, \lambda)$ has the \textpdf\
+\begin{equation}\label{eqn:gamma_pdf}
+	\textstyle \pdf(x \mid \theta) = \frac{\lambda^\sigma}{\Gamma(\sigma)} x^{\sigma-1} \exp(-\lambda x)
+\end{equation}
+where $\Gamma(\cdot)$ is the gamma function.  The observed variable distribution parameters in a single-data mixture model are $\vec\sigma = (\sigma_1, \dots, \sigma_K)$ and $\vec\lambda = (\lambda_1, \dots, \lambda_K)$, with $\theta_y = (\sigma_y, \lambda_y)$.
+
+For multivariate data $\mrv X = (\rv X_1, \dots, \rv X_D)$ for some positive integer $D$, the basic distribution is the multivariate normal, with $\theta = (\vec\mu, \vec\Sigma)$, where $\vec\mu$ is a vector of length $D$ and $\vec\Sigma$ is a $D \times D$ positive definite matrix.  The \textpdf\ is
+\begin{equation}\label{eqn:mvnorm_pdf}
+	\textstyle \pdf(\vec x \mid \theta) = \frac{1}{|\vec\Sigma|^{1/2} (2\pi)^{D/2}} \exp\left\{-\frac{1}{2} (\vec x - \vec\mu)^{\text T} \vec\Sigma^{-1} (\vec x - \vec\mu) \right\}
+\end{equation}
+where $|\cdot|$ denotes the determinant.  The expression in Equation \eqref{eqn:mvnorm_pdf} is often written as $\phi_D(\vec x \mid \theta)$, with the corresponding \textcdf\ $\Phi_D(\vec x \mid \theta)$.  Mixture model parameters are the $K \times D$ matrix $\vec\mu$ of which the $k$th row is $\vec\mu_k = (\mu_{k,1}, \dots, \mu_{k,D})$, and the list $\vec\Sigma = (\vec\Sigma_1, \dots, \vec\Sigma_K)$, each $\vec\Sigma_k$ being a $D \times D$ positive definite matrix.
+
+A useful special case of the multivariate normal is the multivariate standard normal (MVSN), that is, a multivariate normal distribution in which the marginal distributions are all standard normal.  Let $\mrv S = (\rv S_1, \dots, \rv S_D)$ where each $\rv S_d$ is standard normal.  The correlation matrix $\vec\rho$ is a $D \times D$ positive definite matrix of which each diagonal element is equal to 1, and the \textpdf\ of $\mrv S$ is denoted by
+\begin{equation}\label{eqn:std_mvnorm_pdf}
+	\textstyle \phi_{\vec\rho}(\vec s) = \frac{1}{|\vec\rho|^{1/2} (2\pi)^{D/2}} \exp\left\{-\frac{1}{2} \vec s^{\text T} \vec\rho^{-1} \vec s \right\}
+\end{equation}
+with the corresponding \textcdf\ $\Phi_{\vec\rho}(s)$.
+
+This distribution is used to construct non-normal multivariate distributions by the copula method, as described in \citet{Song2000a}.  Briefly, let the marginal \textpdf\ of $\rv X_d$ be denoted $\pdf(x_d \mid \theta)$, with $\pdf(\cdot)$ being one of the univariate \textpdf's given above, and $\cdf(x_d \mid \theta)$ be the corresponding \textcdf.  Now let $s_d = \Phi^{-1}\{\cdf(x_d \mid \theta)\}$, and let the joint \textcdf\ for the $\rv X_d$'s be given by $\cdf(\vec x \mid \theta) = \Phi_{\vec\rho}(\vec s)$.  It follows that the joint \textpdf\ is
+\begin{equation}\label{eqn:normal_copula_pdf}
+	\textstyle \pdf(\vec x \mid \theta) = \phi_{\vec\rho}(\vec s) \prod_d \frac{\pdf(x_d \mid \theta_d)}{\phi(s_d)}
+\end{equation}
+with each $\theta_d$ being the parameters for the marginal distribution of $\rv X_d$, such as $\theta_d = (\sigma_d, \delta_d)$ for the WeiSD or $\theta_d = (\sigma_d, \lambda_d)$ for the gamma.  In the mixture model case, we have the parameters $\vec\rho = (\vec\rho_1, \dots, \vec\rho_K)$ and the set of $\theta_{y,d}$'s, with $\theta_{y,d}$ being the parameters of the marginal distribution of $\rv X_d$ given that $\rv Y = y$.
+
+\subsection{Multiple-data models}\label{subsec:spec.mdmixmod}
+
+In the layered mixture model, there exists a single top-level hidden categorical \textrv\ $\rv Y_0$ which generates the ``layer'' of hidden categorical variables $\mrv Y = (\rv Y_1, \dots, \rv Y_Z)$ for some positive integer $Z$.  The $\rv Y_z$'s, for $z = 1, \dots, Z$, in turn generate the observed variables $\mrv X = (\mrv X_1, \dots, \mrv X_Z)$.  This model is shown in Figure \ref{fig:layered_mixture_model}.
+
+\begin{figure}
+	\begin{center}
+	\includegraphics[width=0.2\paperwidth]{layered.pdf}
+	\end{center}
+	\vspace{-12pt} % LaTeX defaults to too much space between figure and caption, IMO
+	\caption{A layered mixture model.  Ovals indicate hidden variables, while rectangles indicate observed variables.  Arrows show generative relationships, which account for all dependencies in the model.\label{fig:layered_mixture_model}}
+\end{figure}
+
+In the chained mixture model, $\rv Y_0$ generates $\rv Y_1$, which in turn generates $\rv Y_2$, etc.\ up to $\rv Y_Z$.  As in the layered model, each $\rv Y_z$ also generates $\mrv X_z$.  This model is shown in Figure \ref{fig:chained_mixture_model}.
+
+\begin{figure}
+	\begin{center}
+	\includegraphics[width=0.27\paperwidth]{chained.pdf}
+	\end{center}
+	\vspace{-12pt}
+	\caption{A chained mixture model.  Ovals indicate hidden variables, while rectangles indicate observed variables.  Arrows show generative relationships, which account for all dependencies in the model.\label{fig:chained_mixture_model}}
+\end{figure}
+
+In both models, $\rv Y_0$ may take on values from 1 to some positive integer $K_0$.  Its distribution is parameterized by the probability vector $\vec p_0 = (p_{0:1}, \dots, p_{0:K_0})$.  Each $\rv Y_z$ may take on values from 1 to some positive integer $K_z$, and its distribution is parameterized by the matrix $\vec Q_z$.  In the layered model, $\vec Q_z$ is a $K_0 \times K_z$ matrix of which the $(k_0, k_z)$th element is $q_{z:k_0,k_z} = \prob(\rv Y_z = k_z \mid \rv Y_0 = k_0)$.  In the chained model, $\vec Q_z$ is a $K_{z-1} \times K_z$ matrix of which the $(k_{z-1}, k_z)$th element is $q_{z:k_{z-1},k_z} = \prob(\rv Y_z = k_z \mid \rv Y_{z-1} = k_{z-1})$.  Marginally, $\rv Y_z$ has the categorical distribution with probability vector $\vec p_z = \vec Q_z^{\text T} \vec p_0$ in the layered model, or the recursively defined $\vec p_z = \vec Q_z^{\text T} \vec p_{z-1}$ in the chained model.
+
+The relationship between $\mrv X_z$ and $\rv Y_z$ in the multiple-data models is the same as that between $\mrv X$ and $\rv Y$ in the single-data model.  Each $\mrv X_z$ may have any one of the distributions, conditional on $\rv Y_z$, described in \S\ref{subsec:spec.distn}.  Given $\rv Y_z = y_z$, the \textpdf\ for this distribution is denoted $\pdf(\vec x_z \mid \theta_{z:y_z})$.  Let $\vec X = (\vec x_1, \dots, \vec x_Z)$ in this context, and the complete-data \textpdf\ for the layered model is most simply written as
+\begin{equation}\label{eqn:layered_complete_pdf}
+	\textstyle \pdf(\vec X, \vec y, y_0) = p_{0:y_0} \prod_z q_{z:y_0,y_z} \pdf(\vec x_z \mid \theta_{z:y_z})
+\end{equation}
+with the marginal \textpdf\
+\begin{equation}\label{eqn:layered_marginal_pdf}
+	\textstyle \pdf(\vec X) = \sum_{k_0} p_{0:k_0} \prod_z \sum_{k_z} q_{z:k_0,k_z} \pdf(\vec x_z \mid \theta_{z:k_z}).
+\end{equation}
+
+For the chained model,
+\begin{equation}\label{eqn:chained_complete_pdf}
+	\textstyle \pdf(\vec X, \vec y, y_0) = p_{0:y_0} \prod_z q_{z:y_{z-1},y_z} \pdf(\vec x_z \mid \theta_{z:y_z}).
+\end{equation}
+The expression for $\pdf(\vec X)$ is somewhat more complicated than in the layered model.  The function $\alpha_z(y_z) = \pdf(\vec x_1, \dots, \vec x_z, y_z)$ is recursively defined by
+\[
+	\alpha_1(y_1) = p_{1:y_1} \ \pdf(\vec x_1 \mid \theta_{1:y_1})
+\]
+and for $z > 1$,
+\[
+	\textstyle \alpha_z{y_z} = \pdf(\vec x_z \mid \theta_{z:y_z}) \sum_{k_{z-1}} \alpha_{z-1}(k_{z-1}) q_{z:k_{z-1},k_z}.
+\]
+Thus the marginal \textpdf\ is
+\begin{equation}\label{eqn:chained_marginal_pdf}
+	\textstyle \pdf(\vec X) = \sum_{k_Z}\alpha_Z(k_Z).
+\end{equation}
+See \citet{McLachlan2008a} pp.\ 290-293 for background and further details.
+
+\section{Fitting models to data}\label{sec:fit}
+
+The key functions for estimating the parameters of the models described in \S\ref{sec:spec} are \mixmod\ for single-data models and \mdmixmod\ for multiple-data models.  The use of these functions is illustrated with four example data sets, \texttt{exampleData1} through \texttt{exampleData4}.  For the details on the generation of these data sets, see \S\ref{sec:sim}, ``Simulating data.''
+
+\subsection{Single-data models}\label{subsec:fit.mixmod}
+
+To begin, we load the \lcmix\ package and the specified data sets:
+<<prelim>>=
+library(lcmix)
+data(exampleData1)
+data(exampleData2)
+data(exampleData3)
+data(exampleData4)
+@
+The \texttt{exampleData1} set contains data generated from a very simple single-data model using a univariate normal mixture.  It is a list of two elements:  the vector \texttt{X} of length $N=1000$, representing the observed data; and the vector \texttt{Y}, also of length $N$, representing the hidden components.  For model fitting, of course, we assume the components are unknown, and so \texttt{X} is treated as ``the data'' for input.  We fit the normal mixture model with $K=2$ components, observing that \texttt{family="normal"} is the default distribution family and so need not be specified:
+<<mod1fit>>=
+mod1 <- mixmod(exampleData1$X, K=2)
+#$ # keep LaTeX from freaking out about dollar signs
+@
+and then print the model for examination:
+<<mod1print>>=
+mod1
+@
+
+The \texttt{print} method for objects of class \mixmod\ tells us the distribution used in model fitting, here \texttt{"norm"}, the univariate normal; the name and size of the data; the number of components; and model statistics including the number of iterations, the log-likelihood for the parameters of the model given the observed data, the Q-value (the expected complete data log-likelihood), and the \bic\ (Bayesian Information Criterion) value.  A \mixmod\ object is actually a list with a number of elements, of which \texttt{params}, the parameters of the fitted model, are of particular interest:
+<<mod1details>>=
+names(mod1)
+mod1$params
+#$
+@
+The \texttt{hidden} element of \texttt{params} is a list containing the estimated parameters of the distribution of the hidden components; in the single-data model it consists only of the vector \texttt{prob}, corresponding to the estimated $\hatvec p$ parameter of the categorical distribution.  The \texttt{observed} element of \texttt{params} is a list containing the estimated parameters of the distribution of the observed data; here \texttt{mean} and \texttt{sd} correspond to the $\hatvec\mu$ and $\hatvec\sigma$ parameters of the univariate normal mixture distribution, along with \texttt{var} representing $\hatvec\sigma^2 = (\hat\sigma_1^2, \dots, \hat\sigma_K^2)$.
+
+Also of interest are the posterior probabilities that the observed data were generated by one or the other component, given in \texttt{posterior}, an $N \times K$ matrix with elements between 0 and 1 and rows summing to 1, of which the $(n,k)$th element is the posterior probability that the $n$th datum was generated by the $k$th component.  Since here, the components are known, we can look at part of the \texttt{posterior} matrix in comparison to the actual components and see how well the model predicts the component which generated each observed datum:
+<<mod1post>>=
+cbind(mod1$posterior, component=exampleData1$Y)[1:10,]
+@
+
+To reiterate the point that the hidden data are not needed for model fitting --- and, for most real-world data sets, will not in fact be available --- consider the following simple example of simulating, and fitting a model to, a data set with characteristics similar to those of the \texttt{X} element of \texttt{exampleData1}:
+<<mod1a>>=
+MyData <- sample(c(rnorm(100, 3, 3), rnorm(900, -3, 1)))
+MyMod <- mixmod(MyData, 2)
+MyMod
+MyMod$params
+#$
+@
+Here, although the components are unknown thanks to the use of \texttt{sample} in creating the data, the mixing proportions and observed variable distribution parameters are estimated.  The components will, of course, be guessed based on \texttt{posterior}; another element of the \mixmod\ list, the vector \texttt{assignment}, gives the most probable choices.
+
+The \texttt{exampleData2} set contains data generated from a single-data model using a multivariate WeiSD mixture.  As with \texttt{exampleData1}, it is a list with two elements, \texttt{X} and \texttt{Y}, containing the observed and hidden data respectively.  However, here \texttt{X} is a $N \times D$ matrix ($D=4$).  We fit a mixture model with $K=3$ components using the \texttt{weibull} distribution family.  Note that partial matches in family names are allowed, and also that \mixmod\ detects that the observed data are multivariate and chooses a distribution accordingly:
+<<mod2fit>>=
+mod2 <- mixmod(exampleData2$X, 3, family="wei")
+mod2
+mod2$params
+@
+Again, the \texttt{hidden} element of \texttt{params} contains $\hatvec p$, while the \texttt{observed} element contains the estimated observed variable distribution parameters.  Here these consist of $\hatvec\rho = (\hatvec\rho_1, \dots, \hatvec\rho_K)$ in the \texttt{corr} element, and the $\hat\sigma$'s and $\hat\delta$'s in the \texttt{shape} and \texttt{decay} elements; that is, the elements of $\hat\theta_{y,d} = (\hat\sigma_{y,d}, \hat\delta_{y,d})$ are given by \texttt{shape[y,d]} and \texttt{decay[y,d]}.
+
+\subsection{Multiple-data models}\label{subsec:fit.mdmixmod}
+
+The \texttt{exampleData3} set contains contains data generated from a layered model with $Z=2$ in which the first observed data set comes from a univariate normal mixture and the second from a multivariate normal mixture.  It contains the following elements:
+\begin{itemize}
+	\item[\texttt{X}] a list representing samples drawn from the distribution of the observed $\mrv X$, conditional on $\mrv Y$.  It has elements \texttt{ed31}, a vector of length $N=1000$, and \texttt{ed32}, an $N \times D_2$ matrix with $D_2=4$.
+	\item[\texttt{Y}] a list representing samples drawn from the distribution of the hidden $\mrv Y$ layer, conditional on $\rv Y_0$.  It has elements \texttt{ed31} and \texttt{ed32}, both $N$-length vectors.
+	\item[\texttt{Y0}] an $N$-length vector representing samples drawn from the distribution of the top-level hidden $\rv Y_0$.
+\end{itemize}
+Because both the normal distribution family and the layered topology are the defaults, a model with $K_0 = 2$, $K_1 = 2$, and $K_2 = 3$ may be fitted and printed as:
+<<mod3fit>>=
+mod3 <- mdmixmod(exampleData3$X, K=c(2,3), K0=2)
+mod3
+#$
+@
+The \texttt{print} method for objects of class \mdmixmod\ shows the distribution families used, the names of the actual distributions (here, univariate normal or \texttt{"norm"} for \texttt{X[[1]]} and multivariate normal or \texttt{"mvnorm"} for \texttt{X[[2]]}), data name and dimensions, the numbers of components $\vec K = (K_1, \dots, K_Z)$ and $K_0$, and model statistics.
+
+Like an object of class \mixmod, an object of class \mdmixmod\ is a list:
+<<mod3fit>>=
+names(mod3)
+@
+Most of the elements have the same meaning as those in \mixmod.  However, the structure of \texttt{params} is somewhat more complicated, most easily visualized as a nested list using the \texttt{str} function of package \texttt{utils}:
+<<mod3params>>=
+str(mod3$params)
+#$
+@
+Here \texttt{hidden} has the elements \texttt{prob0} representing the estimated $\hatvec p_0$ parameter of the distribution of $\rv Y_0$, and \texttt{cprob} (conditional probability) representing the estimated $\hatvec Q = (\hatvec Q_1, \dots, \hatvec Q_Z)$ parameters of the distributions of the $\rv Y_z$'s.  Observe that the names of the elements of \texttt{cprob} are taken from the names of the elements of \texttt{X}.  The \texttt{observed} element of \texttt{params} also has elements named after the elements of \texttt{X}, representing the estimated parameters of the observed variable distributions.  Specifically, \texttt{ed31} has elements \texttt{mean} for $\hatvec\mu_1 = (\hat\mu_{1:1}, \dots, \hat\mu_{1:K_1})$, \texttt{var} for $\hatvec\sigma^2_1 = (\hat\sigma^2_{1:1}, \dots, \hat\sigma^2_{1:K_1})$, and \texttt{sd} for $\hatvec\sigma = (\hat\sigma_{1:1}, \dots, \hat\sigma_{1:K_1})$, all vectors of length $K_1$; while \texttt{ed32} has elements \texttt{mean}, a $K_2 \times D_2$ matrix of which the $k_2$th row is $\hatvec\mu_{k_2} = (\hat\mu_{k_2:1}, \dots, \hat\mu_{k_2:D_2})$, and \texttt{cov}, a list of length $K_2$, of which the $k_2$th element is the $D_2 \times D_2$ positive definite matrix $\hatvec\Sigma_{k_2}$.
+
+The \texttt{posterior} element of an object of class \mdmixmod\ is the $N \times K_0$ matrix of posterior probabilities for the top-level hidden component; that is, \texttt{posterior[n,k0]} represents the estimated $\prob(\rv Y_0 = k_0)$ for the $n$th datum.  For the posterior probabilities in the second-layer components, the \texttt{W} elements of the \texttt{weights} element of the object contains the weights used in the M-step of the EM algorithm for estimating the final set of parameters for the observed data portion of the model; \texttt{W[[z]][n,kz]} is the estimated $\prob(\rv Y_z = k_z)$ for the $n$th datum.
+
+The \texttt{exampleData4} set contains data generated from a chained model with $Z=2$ in which the first observed data set comes from a univariate Weibull mixture and the second from a multivariate gamma mixture.  It contains the following elements:
+\begin{itemize}
+	\item[\texttt{X}] a list representing samples drawn from the distribution of the observed $\mrv X$, conditional on $\mrv Y$.  It has elements \texttt{ed41}, a vector of length $N=1000$, and \texttt{ed42}, an $N \times D_2$ matrix with $D_2=4$.
+	\item[\texttt{Y}] a list representing samples drawn from the distribution of the hidden $\mrv Y$ layer, conditional on $\rv Y_0$ in the case of $\rv Y_1$, and on $\rv Y_1$ in the case of $\rv Y_2$.  It has elements \texttt{ed41} and \texttt{ed42}, both $N$-length vectors.
+	\item[\texttt{Y0}] an $N$-length vector representing samples drawn from the distribution of the top-level hidden $\rv Y_0$.
+\end{itemize}
+We fit and print a model with $K_0 = 2$, $K_1 = 2$, $K_2 = 3$, the chained topology, and the Weibull and gamma distribution families as follows:
+<<mod4fit>>=
+mod4 <- mdmixmod(exampleData4$X, K=c(2,3), K0=2, topology="chained", family=c("wei","gam"))
+mod4
+#$
+@
+
+The \texttt{posterior} and \texttt{weights} elements of the return value have the same meaning as in the layered model.  The \texttt{params} element has some differences:
+<<mod4params>>=
+str(mod4$params)
+#$
+@
+As in the layered model, the \texttt{prob0} and \texttt{cprob} elements of \texttt{hidden} represent the estimated $\hatvec p_0$ and $\hatvec Q$ parameters respectively (although recall that $\vec Q$ has a somewhat different meaning in the layered model than in the chained.)  The \texttt{probz} element represents the estimated marginal probabilities for the $\rv Y_z$'s, that is, $\hat p_{z:y_z} = \widehat\prob(\rv Y_z = y_z)$, and \texttt{rprob} represents the estimated ``reverse conditional probabilities,'' that is, $\hat r_{z:y_z,y_{z-1}} = \widehat\prob(\rv Y_{z-1} = y_{z-1} \mid \rv Y_z = y_z)$.  Both \texttt{probz} and \texttt{rprob} are functions of \texttt{prob0} and \texttt{cprob}, and are reported only for convenience.  In \texttt{observed}, element \texttt{ed41} has elements \texttt{shape} for $\hatvec\sigma_1 = (\hat\sigma_{1:1}, \dots, \hat\sigma_{1:K_1})$ and \texttt{decay} for elements $\hatvec\delta_1 = (\hat\delta_{1:1}, \dots, \hat\delta_{1:K_1})$.  Element \texttt{ed42} has elements \texttt{shape}, a $K_2 \times D$ matrix of which the $(k_2, d)$th element is $\hat\sigma_{2:k_2,d}$, the estimated shape parameter for the marginal distribution of $\rv X_{2:d}$ (the random variable from which the $d$th column of \texttt{X[[2]]} is drawn) given that $\rv Y_2 = k_2$; \texttt{rate}, a $K_2 \times D$ matrix of which the $(k_2, d)$th element is $\hat\lambda_{2:k_2,d}$, the estimated rate parameter for the marginal distribution of $\rv X_{2:d}$ given that $\rv Y_2 = k_2$; and \texttt{corr}, a $K_2$-length list of which the $k_2$th element is $\hatvec\rho_{2:k_2}$, the estimated copula correlation matrix for the distribution of $\mrv X_2$ given that $\rv Y_2 = k_2$. 
+
+\section{Evaluating model fit}\label{sec:eval}
+
+Evaluations of model fit may be broadly divided into ``internal'' and ``external'' evaluations; in the first case, we wish to know how well the model fits the data; in the second, we wish to know how well the model performs its function, that is, classifying the data into particular groups.  For internal evaluation, the primary tool is the log-likelihood $\mathcal L$ and functions of $\mathcal L$ such as the \bic\ \citep{Schwarz1978a} defined here as
+\begin{equation}\label{eqn:bic}
+	\bic = 2 \mathcal L - |\theta| \log N
+\end{equation}
+where $|\Theta|$ is the size of the parameter space.  In general, given two competing models, the model with the higher \bic\ is preferred.  Log-likelihood and \bic\ are reported when an object of class \texttt{mixmod} or \texttt{mdmixmod} is printed, as seen in \S\ref{sec:fit}.  They can also be extracted using the \texttt{logLik} and \texttt{bic} functions, as seen in the following example.
+<<logLikAndBic>>=
+logLik(mod1)
+bic(mod1)
+mods.ed1 <- lapply(1:4, function(K) mixmod(exampleData1$X, K))
+cbind(llik=sapply(mods.ed1, logLik), bic=sapply(mods.ed1, bic))
+#$
+@
+Log-likelihood cannot be used directly to choose the number of components, because it always increases with the number of model parameters.  But \bic\ peaks here at $K=2$, indicating that the two-component model is a good fit for the observed data in \texttt{exampleData1}.
+
+\bic\ can also be used to choose between two different distributions for modeling data, so long as those distributions have the same support, such as $[0, \infty)$ for the Weibull and gamma:
+<<WeiVsGam>>=
+mod2gam <- mixmod(exampleData2$X, 3, family="gam")
+bic(mod2)
+bic(mod2gam)
+#$
+@
+We see here that the Weibull model outperforms the gamma model on the observed data in \texttt{exampleData2}.
+
+The expected log-likelihood for the complete data, that is, the value of the Q-function in the final iteration of the EM algorithm, can be extracted with the \texttt{qval} function.  The value of this function is the sum of hidden and observed log-likelihood terms, as reported by the \texttt{qfun} function:
+<<qfuns>>=
+qval(mod3)
+qfun(mod3)
+@
+
+Log-likelihood should converge smoothly during execution of the EM algorithm.  To examine the convergence characteristics, we can plot the iteration history using the \texttt{convergence.plot} function:
+<<label=con_plot, include=FALSE>>=
+convergence.plot(mod4)
+@
+The resulting plot is shown in Figure \ref{fig:con_plot}.
+\begin{figure}
+\begin{center}
+<<label=con_fig, fig=TRUE, echo=FALSE>>=
+<<con_plot>>
+@
+\end{center}
+\vspace{-24pt}
+\caption{Convergence plot for \texttt{mod4} fitted to the observed data in \texttt{exampleData4}.}
+\label{fig:con_plot}
+\end{figure}
+
+External evaluation is possible only when at least some of the true component labels are known.  In the case of the \texttt{exampleData} sets, where all the components are known, the \roc\ (receiver operating characteristic) curve is a useful tool for evaluation.  In \lcmix\, as long as the suggested \texttt{ROCR} package is installed, one or more \roc\ curves may be drawn on the same plot using the \texttt{multiROC} function and its associated \texttt{plot} method:
+<<label=roc_plot_mod1, include=FALSE>>=
+plot(multiROC(list(mod1=mod1$posterior[,1]), labels=(exampleData1$Y==1)))
+@
+The resulting plot, shown in Figure \ref{fig:roc_plot_mod1}, allows us to evaluate how well the model predicts membership in the first component.  A large AUC, or area under the \roc\ curve, close to 1, and a small DCA, or distance of closest approach of the curve to the point (0, 1), are both indicators of a good predictive model; the closer AUC is to 1 and DCA is to 0, the better the prediction.
+\begin{figure}
+\begin{center}
+<<label=roc_fig_mod1, fig=TRUE, echo=FALSE>>=
+<<roc_plot_mod1>>
+@
+\end{center}
+\vspace{-24pt}
+\caption{\roc\ plot for \texttt{mod1}'s predictions of membership in the first component in \texttt{exampleData1}.}
+\label{fig:roc_plot_mod1}
+\end{figure}
+
+In the event that only some of the labels are known --- that is, some of the data are known to belong to a particular category, but we know or suspect that other, unlabeled data are also members of the category --- a quasi-\roc\ plot in which the x-axis of the plot represents all positives rather than false positives, may be used.  This is reasonable when the overall rate of membership in the category of interest is thought to be small.  As an example, suppose we have incomplete knowledge about membership in the first component in \texttt{exampleData2}:
+<<label=quasi_roc_plot_mod2, include=FALSE>>=
+set.seed(123)
+N <- length(exampleData2$Y)
+labels2 <- (exampleData2$Y==1) & as.logical(rbinom(N, 1, 0.5))
+plot(multiROC(list(mod2=mod2$posterior[,1]), labels2, quasi=TRUE))
+#$
+@
+The resulting plot is shown in Figure \ref{fig:quasi_roc_plot_mod2}.
+\begin{figure}
+\begin{center}
+<<label=quasi_roc_fig_mod2, fig=TRUE, echo=FALSE>>=
+<<quasi_roc_plot_mod2>>
+@
+\end{center}
+\vspace{-24pt}
+\caption{Quasi-\roc\ plot for \texttt{mod2}'s predictions of membership in the first component in \texttt{exampleData2}, with partial knowledge.}
+\label{fig:quasi_roc_plot_mod2}
+\end{figure}
+
+\setkeys{Gin}{width=1.05\textwidth}
+As its name implies, \texttt{multiROC} also allows us to draw multiple \roc\ curves on a single plot.  For example, we may compare the effectiveness of the layered model at predicting top-level ($rv Y_0$) first-component membership to that of the individual data sources in \texttt{exampleData3}, in both color and black-and-white:
+<<label=multi_roc_plot_mod3, include=FALSE>>=
+mod31 <- mixmod(exampleData3$X$ed31, 2)
+mod32 <- mixmod(exampleData3$X$ed32, 3)
+preds3 <- list(layered=mod3$posterior[,1], univariate=mod31$posterior[,1], multivariate=mod32$posterior[,1])
+labels3 <- (exampleData3$Y0 == 1)
+par(mfrow=c(1,2))
+plot(multiROC(preds3, labels3))
+plot.multiROC.bw(multiROC(preds3, labels3))
+par(mfrow=c(1,1))
+@
+The resulting plot is shown in Figure \ref{fig:multi_roc_plot_mod3}.
+\begin{figure}
+\begin{center}
+<<label=multi_roc_fig_mod3, fig=TRUE, echo=FALSE, width=14, height=7>>=
+<<multi_roc_plot_mod3>>
+@
+\end{center}
+\vspace{-24pt}
+\caption{Multiple \roc\ plots for multiple-data and single-data predictions of membership in the first top-level component in \texttt{exampleData3}.}
+\label{fig:multi_roc_plot_mod3}
+\end{figure}
+\setkeys{Gin}{width=0.8\textwidth}
+
+Finally, \texttt{multiROC} can plot multiple predictors against multiple labels.  For this example, we compare the chained model's top-level first-component membership predictions to predictions of membership in the first component at the $\rv Y_z$ level:
+<<label=multi_roc_plot_mod4, include=FALSE>>=
+preds4 <- list()
+preds4$chained <- mod4$posterior[,1]
+preds4$univariate <- mod4$weights$W$ed41[,1]
+preds4$multivariate <- mod4$weights$W$ed42[,1]
+labels4 <- list()
+labels4$chained <- (exampleData4$Y0 == 1)
+labels4$univariate <- (exampleData4$Y$ed41 == 1)
+labels4$multivariate <- (exampleData4$Y$ed42 == 1)
+mr4 <- multiROC(preds4, labels4)
+plot(mr4)
+@
+The resulting plot is shown in Figure \ref{fig:multi_roc_plot_mod4}.
+\begin{figure}
+\begin{center}
+<<label=multi_roc_fig_mod4, fig=TRUE, echo=FALSE>>=
+<<multi_roc_plot_mod4>>
+@
+\end{center}
+\vspace{-24pt}
+\caption{Multiple \roc\ plots for chained model predictions in \texttt{exampleData4}.}
+\label{fig:multi_roc_plot_mod4}
+\end{figure}
+The performance measures are present in the \texttt{meas} element of a \texttt{multiROC} object:
+<<multi_roc_meas_mod4>>=
+mr4$meas
+#$
+@
+
+\section{Simulating data}\label{sec:sim}
+
+The key functions for simulating data are \texttt{simulate.mixdata} for simulation of a single data source, \texttt{simulate.mdmixdata} for simulation of multiple data sources, and \texttt{simulate.from.fit} for simulation from an already fitted (single-data or multiple-data) model.  All simulation functions return both the observed and hidden data.  The use of the first two functions to create the \texttt{exampleData} sets included in \lcmix, is illustrated below, followed by the used of the third function to create a data set similar to \texttt{exampleData1}
+
+To begin, we set a random seed to ensure reproducibility, and establish the size of the data we wish to simulate:
+
+<<sim_prelim>>=
+set.seed(123)
+N <- 1000
+@
+
+Next we set up the parameters for a very simple single-data model using a univariate normal mixture, and call \texttt{simulate.mixdata} to create the data sets \texttt{exampleData1}:
+
+<<exampleData1>>=
+p <- c(0.1, 0.9)
+mu <- c(3, -3)
+sigma <- c(3, 1)
+
+params1 <- list(hidden   = list(prob=p),
+                observed = list(mean=mu, sd=sigma, var=sigma^2))
+
+exampleData1 <- simulate.mixdata(N, distn="norm", params=params1)
+@
+
+That is, we have a univariate normal mixture with two components ($K=2$) with hidden variable distribution parameters $p_1 = 0.1, p_2 = 0.9$, and observed variable distribution parameters $\mu_1 = 3, \ \mu_2 = -3$ and $\sigma_1 = 3, \ \sigma_2 = 1$.  The structure of the \texttt{params} argument to \texttt{simulate.mixdata} is important; it reflects the structure of the parameters returned by the model-fitting functions discussed in \S\ref{sec:fit}.  The \texttt{var} element in the \texttt{observed} list in \texttt{params1} is not strictly necessary, as the normal distribution simulation requires only the standard deviation, but is included to match the full structure.
+
+The \texttt{exampleData1} data set is a list with the observed data in element \texttt{X} and the hidden data in the element \texttt{Y}, both vectors of length \texttt{N}:
+
+<<examineExampleData1>>=
+names(exampleData1)
+dim(as.data.frame(exampleData1))
+as.data.frame(exampleData1)[1:10,]
+@
+
+Note that as expected, 1 out of 10 of the simulated data are assigned to component 1.
+
+For a slightly more complicated example, we next simulate data from a multivariate Weibull (WeiSD) mixture distribution with $K=3$ components and observed data width $D=4$:
+
+<<exampleData2>>=
+p <- c(0.1, 0.7, 0.2)
+s <- matrix(12:1, ncol=4)
+d <- matrix(1:12, ncol=4)
+rho <- lapply(1:3, function(k) cor(matrix(rnorm(40), ncol=4)))
+
+params2 <- list(hidden   = list(prob=p),
+                observed = list(shape=s,
+                                decay=d,
+                                corr=rho))
+
+exampleData2 <- simulate.mixdata(N, "mvweisd", params2)
+
+names(exampleData2)
+class(exampleData2$X)
+dim(exampleData2$X)
+class(exampleData2$Y)
+length(exampleData2$Y)
+rho
+@
+
+Note that the shape and decay parameters are $K \times D$ matrices, such that \texttt{s[y,d]} and \texttt{d[y,d]} are the shape and decay used to generate values in \texttt{X[,d]} where \texttt{Y == d}.  The correlation parameter \texttt{rho} is a list such that the columns of \texttt{X} are simulated using copula correlation \texttt{rho[[d]]} where \texttt{Y == d}.
+
+The \texttt{exampleData3} set is generated using \texttt{simulate.mdmixmod} and parameters having the same structure as the \texttt{params} element of an object of class \texttt{mdmixmod}; see \S\ref{subsec:fit.mdmixmod} for details.
+<<exampleData3>>=
+p0 <- c(0.3, 0.7)
+
+Q1 <- matrix(c(0.9, 0.1,
+              0.3, 0.7),
+            nrow=2, byrow=TRUE)
+
+Q2 <- matrix(c(0.6, 0.2, 0.2,
+              0.1, 0.8, 0.1),
+            nrow=2, byrow=TRUE)
+
+Q <- list(ed31=Q1, ed32=Q2)
+
+mu1 <- c(3, -3)
+mu2 <- matrix(c( 3,  2,  1,  4,
+                 1, -2,  0, -1,
+                -2, -4, -3, -5),
+              nrow=3, byrow=TRUE)
+colnames(mu2) <- paste("ed32", 1:4, sep="")
+
+sigmasq1 <- 1 + rexp(2)
+sigma1 <- sqrt(sigmasq1)
+
+Sigma2 <- lapply(1:3, function(k) {
+	Z = matrix(rnorm(100), ncol=4)
+	colnames(Z) = paste("ed32", 1:4, sep="")
+	mlecov(Z)
+})
+
+theta.ed31 <- list(mean=mu1, var=sigmasq1, sd=sigma1)
+
+theta.ed32 <- list(mean=mu2, cov=Sigma2)
+
+params3 <- list(hidden   = list(prob0=p0, cprob=Q),
+                observed = list(ed31=theta.ed31, ed32=theta.ed32))
+
+exampleData3 <- simulate.mdmixdata(N, c("norm", "mvnorm"), params3)
+@
+
+The \texttt{exampleData4} set follows the same pattern; note that the \texttt{rprob} and \texttt{probz} elements of the \texttt{hidden} parameter element are not needed as input, although they may be included without effect.
+<<exampleData4>>=
+shape1 <- c(1, 2)
+decay1 <- c(1, 4)
+theta.ed41 <- list(shape=shape1, decay=decay1)
+
+shape2 <- s
+rate2 <- d
+corr2 <- lapply(Sigma2, function(Sigma) {
+	res = cov2cor(Sigma)
+	colnames(res) = rownames(res) = paste("ed42", 1:4, sep="")
+	return(res)
+})
+theta.ed42 <- list(shape=shape2, rate=rate2, corr=corr2)
+
+names(Q) <- c("ed41", "ed42")
+
+params4 <- list(hidden   = list(prob0=p0, cprob=Q),
+               observed = list(ed41=theta.ed41, ed42=theta.ed42))
+
+exampleData4 <- simulate.mdmixdata(N, c("weisd", "mvgamma"), params4, 
+	topology="chained")
+@
+
+Given a fitted model, we may simply simulate from the parameters of the model using the \texttt{simulate.from.fit} convenience function:
+<<exampleData1sim>>=
+exampleData1sim <- simulate.from.fit(mod1)
+mod1sim <- mixmod(exampleData1sim$X, 2)
+mod1$params
+mod1sim$params
+#$
+@
+The first line in the above example is equivalent to
+<<>>=
+exampleData1sim <- simulate.mixdata(mod1$N, mod1$distn, mod1$params)
+#$
+@
+but is somewhat simpler; \texttt{simulate.from.fit} is particularly convenient when dealing with objects of class \texttt{mdmixdata}.
+
+\addcontentsline{toc}{section}{References}
+\bibliography{lcmix} % local bibliography file
+\bibliographystyle{plainnat}
+
+\end{document}
